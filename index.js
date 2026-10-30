@@ -59,6 +59,9 @@ app.post('/api/weread', async (req, res) => {
     });
 
     const data = await response.json();
+    console.log('=== 微信读书返回的真实数据 ===');
+    console.log(JSON.stringify(data, null, 2));
+    console.log('==============================');
 
     // 随机模式下，打乱顺序并截取
     if (mode === 'random' && data && data.books && data.books.length > 0) {
