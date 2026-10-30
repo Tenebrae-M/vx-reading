@@ -8,15 +8,9 @@ app.use(express.json());
 
 // 极其丰富的随机词库
 const RANDOM_KEYWORDS = [
-  // 小说与文学
-  '小说', '文学', '长篇小说', '短篇小说', '推理', '悬疑', '科幻', '奇幻', '武侠', '言情', 
-  '历史小说', '经典名著', '外国文学', '中国文学', '散文', '随笔', '诗歌', '治愈', '青春',
-  // 历史与社科
-  '历史', '中国历史', '世界历史', '传记', '人物传记', '社会学', '人类学', '政治', '哲学', '心理学',
-  // 商业与科技
-  '经济', '商业', '管理学', '投资', '理财', '营销', '互联网', '科技', '人工智能', '编程',
-  // 生活与艺术
-  '生活', '美食', '旅行', '健康', '养生', '艺术', '设计', '摄影', '音乐', '电影'
+  '小说', '文学', '长篇', '短篇', '推理', '悬疑', '科幻', '奇幻', '武侠', '言情', 
+  '历史', '传记', '社会学', '心理学', '哲学', '经济', '商业', '投资', '互联网', 
+  '科技', '人工智能', '编程', '生活', '美食', '旅行', '艺术', '摄影', '音乐'
 ];
 
 app.post('/api/weread', async (req, res) => {
@@ -27,19 +21,15 @@ app.post('/api/weread', async (req, res) => {
     }
 
     const mode = req.body.mode || 'tag'; 
-    const keyword = req.body.keyword || '小说'; 
+    // 修复：前端可能传 keyword、tag 或者 query，这里做个兼容
+    const keyword = req.body.keyword || req.body.tag || req.body.query || '小说'; 
     const count = req.body.count || 1; 
 
     let finalKeyword = keyword;
-    let requestCount = count;
+    let requestCount = 10; // 统一多要一点，方便洗牌
 
-    // 如果是随机模式
     if (mode === 'random') {
-      // 从丰富的词库中随机抽取一个词
       finalKeyword = RANDOM_KEYWORDS[Math.floor(Math.random() * RANDOM_KEYWORDS.length)];
-      
-      // 多要一点（10本），方便后端打乱后抽出最不重复的
-      requestCount =10; 
     }
 
     const wereadPayload = {
@@ -58,20 +48,48 @@ app.post('/api/weread', async (req, res) => {
       body: JSON.stringify(wereadPayload)
     });
 
-    const data = await response.json();
-    console.log('=== 微信读书返回的真实数据 ===');
-    console.log(JSON.stringify(data, null, 2));
-    console.log('==============================');
-
-    // 随机模式下，打乱顺序并截取
-    if (mode === 'random' && data && data.books && data.books.length > 0) {
-      // 数组乱序
-      data.books = data.books.sort(() => Math.random() - 0.5);
-      // 截取前端要求的数量（1-3本）
-      data.books = data.books.slice(0, count);
+    const rawData = await response.json();
+    
+    // === 核心修改：解析微信读书复杂的嵌套结构 ===
+    let allBooks = [];
+    
+    // 检查是否存在 results 数组
+    if (rawData && rawData.results && Array.isArray(rawData.results)) {
+      // 优先找 "电子书" 分类（通常是最准的）
+      const ebookCategory = rawData.results.find(r => r.title === '电子书');
+      
+      if (ebookCategory && ebookCategory.books) {
+        // 提取 bookInfo 里的真实数据
+        allBooks = ebookCategory.books.map(item => item.bookInfo);
+      } else {
+        // 如果没有电子书分类，就把所有分类里的书都搜集起来
+        rawData.results.forEach(category => {
+          if (category.books && Array.isArray(category.books)) {
+            category.books.forEach(item => {
+              if (item.bookInfo) allBooks.push(item.bookInfo);
+            });
+          }
+        });
+      }
     }
 
-    res.json(data);
+    // 如果没拿到书，返回空
+    if (allBooks.length === 0) {
+      return res.json({ books: [] });
+    }
+
+    // === 核心修改：去重、打乱、截取 ===
+    // 1. 根据 bookId 去重（防止搜出同名同作者的多版本）
+    const uniqueBooks = Array.from(new Map(allBooks.map(b => [b.bookId, b])).values());
+    
+    // 2. 打乱数组
+    uniqueBooks.sort(() => Math.random() - 0.5);
+
+    // 3. 截取前端需要的数量
+    const finalBooks = uniqueBooks.slice(0, count);
+
+    // 返回给前端标准格式
+    res.json({ books: finalBooks });
     
   } catch (error) {
     console.error('Proxy Error:', error);
