@@ -3,35 +3,71 @@ const cors = require('cors');
 const fetch = require('node-fetch');
 
 const app = express();
-
-// 允许所有前端跨域请求
 app.use(cors());
-// 解析 JSON 请求体
 app.use(express.json());
 
-// 定义代理接口
+// 极其丰富的随机词库
+const RANDOM_KEYWORDS = [
+  // 小说与文学
+  '小说', '文学', '长篇小说', '短篇小说', '推理', '悬疑', '科幻', '奇幻', '武侠', '言情', 
+  '历史小说', '经典名著', '外国文学', '中国文学', '散文', '随笔', '诗歌', '治愈', '青春',
+  // 历史与社科
+  '历史', '中国历史', '世界历史', '传记', '人物传记', '社会学', '人类学', '政治', '哲学', '心理学',
+  // 商业与科技
+  '经济', '商业', '管理学', '投资', '理财', '营销', '互联网', '科技', '人工智能', '编程',
+  // 生活与艺术
+  '生活', '美食', '旅行', '健康', '养生', '艺术', '设计', '摄影', '音乐', '电影'
+];
+
 app.post('/api/weread', async (req, res) => {
   try {
-    // 获取前端传来的 API Key
     const authHeader = req.headers.authorization;
     if (!authHeader) {
       return res.status(401).json({ error: 'Missing Authorization header' });
     }
 
-    // 向微信读书官方网关发起请求
+    const mode = req.body.mode || 'tag'; 
+    const keyword = req.body.keyword || '小说'; 
+    const count = req.body.count || 1; 
+
+    let finalKeyword = keyword;
+    let requestCount = count;
+
+    // 如果是随机模式
+    if (mode === 'random') {
+      // 从丰富的词库中随机抽取一个词
+      finalKeyword = RANDOM_KEYWORDS[Math.floor(Math.random() * RANDOM_KEYWORDS.length)];
+      
+      // 多要一点（10本），方便后端打乱后抽出最不重复的
+      requestCount =10; 
+    }
+
+    const wereadPayload = {
+      "api_name": "/store/search",
+      "keyword": finalKeyword,
+      "count": requestCount,
+      "skill_version": "1.0.5"
+    };
+
     const response = await fetch('https://i.weread.qq.com/api/agent/gateway', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': authHeader
       },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify(wereadPayload)
     });
 
-    // 获取微信读书返回的数据
     const data = await response.json();
-    
-    // 把数据原样返回给你的小手机前端
+
+    // 随机模式下，打乱顺序并截取
+    if (mode === 'random' && data && data.books && data.books.length > 0) {
+      // 数组乱序
+      data.books = data.books.sort(() => Math.random() - 0.5);
+      // 截取前端要求的数量（1-3本）
+      data.books = data.books.slice(0, count);
+    }
+
     res.json(data);
     
   } catch (error) {
@@ -40,13 +76,7 @@ app.post('/api/weread', async (req, res) => {
   }
 });
 
-// 健康检查接口（用来测试 Render 是否活着）
-app.get('/', (req, res) => {
-  res.send('Weread Proxy is running!');
-});
+app.get('/', (req, res) => res.send('Weread Proxy is running!'));
 
-// 监听端口（Render 会自动分配 PORT 环境变量）
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Proxy server is running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Proxy running on port ${PORT}`));
