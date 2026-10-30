@@ -6,11 +6,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 极其丰富的随机词库
 const RANDOM_KEYWORDS = [
-  '小说', '文学', '长篇', '短篇', '推理', '悬疑', '科幻', '奇幻', '武侠', '言情', 
-  '历史', '传记', '社会学', '心理学', '哲学', '经济', '商业', '投资', '互联网', 
-  '科技', '人工智能', '编程', '生活', '美食', '旅行', '艺术', '摄影', '音乐'
+  '小说', '文学', '推理', '悬疑', '科幻', '奇幻', '武侠', '言情', 
+  '历史', '传记', '社会学', '心理学', '哲学', '经济', '商业', '投资', 
+  '科技', '人工智能', '编程', '生活', '美食', '旅行', '艺术', '摄影'
 ];
 
 app.post('/api/weread', async (req, res) => {
@@ -21,23 +20,17 @@ app.post('/api/weread', async (req, res) => {
     }
 
     const mode = req.body.mode || 'tag'; 
-    // 修复：前端可能传 keyword、tag 或者 query，这里做个兼容
     const keyword = req.body.keyword || req.body.tag || req.body.query || '小说'; 
     const count = req.body.count || 1; 
 
     let finalKeyword = keyword;
-    let requestCount = 10; // 统一多要一点，方便洗牌
+    let requestCount = 10; // 统一要 10 本
 
     if (mode === 'random') {
-      finalKeyword = RANDOM_KEYWORDS[Math.floor(Math.random() * RANDOM_KEYWORDS.length)];
+      // 【核心修改】随机抽 3 个词，用空格拼接，作为一次搜索
+      const shuffled = [...RANDOM_KEYWORDS].sort(() => Math.random() - 0.5);
+      finalKeyword = `${shuffled[0]} ${shuffled[1]} ${shuffled[2]}`; 
     }
-
-    const wereadPayload = {
-      "api_name": "/store/search",
-      "keyword": finalKeyword,
-      "count": requestCount,
-      "skill_version": "1.0.5"
-    };
 
     const response = await fetch('https://i.weread.qq.com/api/agent/gateway', {
       method: 'POST',
@@ -45,51 +38,31 @@ app.post('/api/weread', async (req, res) => {
         'Content-Type': 'application/json',
         'Authorization': authHeader
       },
-      body: JSON.stringify(wereadPayload)
+      body: JSON.stringify({
+        "api_name": "/store/search",
+        "keyword": finalKeyword,
+        "count": requestCount,
+        "skill_version": "1.0.5"
+      })
     });
 
     const rawData = await response.json();
     
-    // === 核心修改：解析微信读书复杂的嵌套结构 ===
+    // 解析数据
     let allBooks = [];
-    
-    // 检查是否存在 results 数组
     if (rawData && rawData.results && Array.isArray(rawData.results)) {
-      // 优先找 "电子书" 分类（通常是最准的）
       const ebookCategory = rawData.results.find(r => r.title === '电子书');
-      
       if (ebookCategory && ebookCategory.books) {
-        // 提取 bookInfo 里的真实数据
         allBooks = ebookCategory.books.map(item => item.bookInfo);
-      } else {
-        // 如果没有电子书分类，就把所有分类里的书都搜集起来
-        rawData.results.forEach(category => {
-          if (category.books && Array.isArray(category.books)) {
-            category.books.forEach(item => {
-              if (item.bookInfo) allBooks.push(item.bookInfo);
-            });
-          }
-        });
       }
     }
 
-    // 如果没拿到书，返回空
-    if (allBooks.length === 0) {
-      return res.json({ books: [] });
-    }
-
-    // === 核心修改：去重、打乱、截取 ===
-    // 1. 根据 bookId 去重（防止搜出同名同作者的多版本）
+    // 去重并打乱
     const uniqueBooks = Array.from(new Map(allBooks.map(b => [b.bookId, b])).values());
-    
-    // 2. 打乱数组
     uniqueBooks.sort(() => Math.random() - 0.5);
 
-    // 3. 截取前端需要的数量
-    const finalBooks = uniqueBooks.slice(0, count);
-
-    // 返回给前端标准格式
-    res.json({ books: finalBooks });
+    // 截取返回
+    res.json({ books: uniqueBooks.slice(0, count) });
     
   } catch (error) {
     console.error('Proxy Error:', error);
